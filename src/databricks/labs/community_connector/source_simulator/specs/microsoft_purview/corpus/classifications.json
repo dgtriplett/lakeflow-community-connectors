@@ -1,0 +1,208 @@
+[
+  {
+    "category": "CLASSIFICATION",
+    "guid": "7c2a1b3e-0000-4000-8000-000000000000",
+    "name": "MICROSOFT.PERSONAL.EMAIL",
+    "description": "Classification MICROSOFT.PERSONAL.EMAIL",
+    "serviceType": "Microsoft Purview",
+    "typeVersion": "1.0",
+    "version": 1,
+    "createdBy": "admin",
+    "updatedBy": "admin",
+    "createTime": 1700000000000,
+    "updateTime": 1700000500000,
+    "lastModifiedTS": "1",
+    "superTypes": [],
+    "subTypes": [],
+    "entityTypes": [
+      "DataSet"
+    ],
+    "attributeDefs": [
+      {
+        "name": "confidence",
+        "typeName": "int",
+        "description": "Match confidence",
+        "isOptional": true,
+        "cardinality": "SINGLE",
+        "isUnique": false,
+        "isIndexable": true,
+        "defaultValue": "0"
+      }
+    ],
+    "options": {
+      "displayName": "Email"
+    }
+  },
+  {
+    "category": "CLASSIFICATION",
+    "guid": "7c2a1b3e-0000-4000-8000-000000000001",
+    "name": "MICROSOFT.PERSONAL.NAME",
+    "description": "Classification MICROSOFT.PERSONAL.NAME",
+    "serviceType": "Microsoft Purview",
+    "typeVersion": "1.0",
+    "version": 2,
+    "createdBy": "admin",
+    "updatedBy": "admin",
+    "createTime": 1700000001000,
+    "updateTime": 1700000501000,
+    "lastModifiedTS": "2",
+    "superTypes": [],
+    "subTypes": [],
+    "entityTypes": [
+      "DataSet"
+    ],
+    "attributeDefs": [
+      {
+        "name": "confidence",
+        "typeName": "int",
+        "description": "Match confidence",
+        "isOptional": true,
+        "cardinality": "SINGLE",
+        "isUnique": false,
+        "isIndexable": true,
+        "defaultValue": "0"
+      }
+    ],
+    "options": {
+      "displayName": "Name"
+    }
+  },
+  {
+    "category": "CLASSIFICATION",
+    "guid": "7c2a1b3e-0000-4000-8000-000000000002",
+    "name": "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+    "description": "Classification MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+    "serviceType": "Microsoft Purview",
+    "typeVersion": "1.0",
+    "version": 3,
+    "createdBy": "admin",
+    "updatedBy": "admin",
+    "createTime": 1700000002000,
+    "updateTime": 1700000502000,
+    "lastModifiedTS": "3",
+    "superTypes": [],
+    "subTypes": [],
+    "entityTypes": [
+      "DataSet"
+    ],
+    "attributeDefs": [
+      {
+        "name": "confidence",
+        "typeName": "int",
+        "description": "Match confidence",
+        "isOptional": true,
+        "cardinality": "SINGLE",
+        "isUnique": false,
+        "isIndexable": true,
+        "defaultValue": "0"
+      }
+    ],
+    "options": {
+      "displayName": "Credit_Card_Number"
+    }
+  },
+  {
+    "category": "CLASSIFICATION",
+    "guid": "7c2a1b3e-0000-4000-8000-000000000003",
+    "name": "CONTOSO.EMPLOYEE_ID",
+    "description": "Classification CONTOSO.EMPLOYEE_ID",
+    "serviceType": "Custom",
+    "typeVersion": "1.0",
+    "version": 4,
+    "createdBy": "admin",
+    "updatedBy": "admin",
+    "createTime": 1700000003000,
+    "updateTime": 1700000503000,
+    "lastModifiedTS": "4",
+    "superTypes": [],
+    "subTypes": [
+      "CONTOSO.CHILD"
+    ],
+    "entityTypes": [
+      "DataSet"
+    ],
+    "attributeDefs": [
+      {
+        "name": "confidence",
+        "typeName": "int",
+        "description": "Match confidence",
+        "isOptional": true,
+        "cardinality": "SINGLE",
+        "isUnique": false,
+        "isIndexable": true,
+        "defaultValue": "0"
+      }
+    ],
+    "options": {
+      "displayName": "Employee_Id"
+    }
+  },
+  {
+    "category": "CLASSIFICATION",
+    "guid": "7c2a1b3e-0000-4000-8000-000000000004",
+    "name": "CONTOSO.METER_ID",
+    "description": "Classification CONTOSO.METER_ID",
+    "serviceType": "Custom",
+    "typeVersion": "1.0",
+    "version": 5,
+    "createdBy": "admin",
+    "updatedBy": "admin",
+    "createTime": 1700000004000,
+    "updateTime": 1700000504000,
+    "lastModifiedTS": "5",
+    "superTypes": [],
+    "subTypes": [],
+    "entityTypes": [
+      "DataSet"
+    ],
+    "attributeDefs": [
+      {
+        "name": "confidence",
+        "typeName": "int",
+        "description": "Match confidence",
+        "isOptional": true,
+        "cardinality": "SINGLE",
+        "isUnique": false,
+        "isIndexable": true,
+        "defaultValue": "0"
+      }
+    ],
+    "options": {
+      "displayName": "Meter_Id"
+    }
+  },
+  {
+    "category": "CLASSIFICATION",
+    "guid": "7c2a1b3e-0000-4000-8000-000000000005",
+    "name": "CONTOSO.CUSTOMER_ACCOUNT",
+    "description": "Classification CONTOSO.CUSTOMER_ACCOUNT",
+    "serviceType": "Custom",
+    "typeVersion": "1.0",
+    "version": 6,
+    "createdBy": "admin",
+    "updatedBy": "admin",
+    "createTime": 1700000005000,
+    "updateTime": 1700000505000,
+    "lastModifiedTS": "6",
+    "superTypes": [],
+    "subTypes": [],
+    "entityTypes": [
+      "DataSet"
+    ],
+    "attributeDefs": [
+      {
+        "name": "confidence",
+        "typeName": "int",
+        "description": "Match confidence",
+        "isOptional": true,
+        "cardinality": "SINGLE",
+        "isUnique": false,
+        "isIndexable": true,
+        "defaultValue": "0"
+      }
+    ],
+    "options": {
+      "displayName": "Customer_Account"
+    }
+  }
+]

@@ -1,0 +1,170 @@
+[
+  {
+    "id": "/classificationrules/MICROSOFT.PERSONAL.EMAIL",
+    "name": "MICROSOFT.PERSONAL.EMAIL",
+    "kind": "System",
+    "properties": {
+      "description": "Rule for MICROSOFT.PERSONAL.EMAIL",
+      "version": 1,
+      "classificationName": "MICROSOFT.PERSONAL.EMAIL",
+      "ruleStatus": "Enabled",
+      "classificationAction": "Keep",
+      "minimumPercentageMatch": 60.0,
+      "minimumDistinctMatchCount": 8,
+      "dataPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": "^[A-Z]{2}[0-9]{6}$"
+        }
+      ],
+      "columnPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": ".*id.*"
+        }
+      ],
+      "createdAt": "2025-01-01T10:00:00Z",
+      "lastModifiedAt": "2025-06-01T10:00:00Z"
+    }
+  },
+  {
+    "id": "/classificationrules/MICROSOFT.PERSONAL.NAME",
+    "name": "MICROSOFT.PERSONAL.NAME",
+    "kind": "System",
+    "properties": {
+      "description": "Rule for MICROSOFT.PERSONAL.NAME",
+      "version": 2,
+      "classificationName": "MICROSOFT.PERSONAL.NAME",
+      "ruleStatus": "Enabled",
+      "classificationAction": "Keep",
+      "minimumPercentageMatch": 60.0,
+      "minimumDistinctMatchCount": 8,
+      "dataPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": "^[A-Z]{2}[0-9]{6}$"
+        }
+      ],
+      "columnPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": ".*id.*"
+        }
+      ],
+      "createdAt": "2025-01-02T10:00:00Z",
+      "lastModifiedAt": "2025-06-02T10:00:00Z"
+    }
+  },
+  {
+    "id": "/classificationrules/MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+    "name": "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+    "kind": "System",
+    "properties": {
+      "description": "Rule for MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+      "version": 3,
+      "classificationName": "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+      "ruleStatus": "Enabled",
+      "classificationAction": "Keep",
+      "minimumPercentageMatch": 60.0,
+      "minimumDistinctMatchCount": 8,
+      "dataPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": "^[A-Z]{2}[0-9]{6}$"
+        }
+      ],
+      "columnPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": ".*id.*"
+        }
+      ],
+      "createdAt": "2025-01-03T10:00:00Z",
+      "lastModifiedAt": "2025-06-03T10:00:00Z"
+    }
+  },
+  {
+    "id": "/classificationrules/CONTOSO.EMPLOYEE_ID",
+    "name": "CONTOSO.EMPLOYEE_ID",
+    "kind": "Custom",
+    "properties": {
+      "description": "Rule for CONTOSO.EMPLOYEE_ID",
+      "version": 4,
+      "classificationName": "CONTOSO.EMPLOYEE_ID",
+      "ruleStatus": "Enabled",
+      "classificationAction": "Keep",
+      "minimumPercentageMatch": 60.0,
+      "minimumDistinctMatchCount": 8,
+      "dataPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": "^[A-Z]{2}[0-9]{6}$"
+        }
+      ],
+      "columnPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": ".*id.*"
+        }
+      ],
+      "createdAt": "2025-01-04T10:00:00Z",
+      "lastModifiedAt": "2025-06-04T10:00:00Z"
+    }
+  },
+  {
+    "id": "/classificationrules/CONTOSO.METER_ID",
+    "name": "CONTOSO.METER_ID",
+    "kind": "Custom",
+    "properties": {
+      "description": "Rule for CONTOSO.METER_ID",
+      "version": 5,
+      "classificationName": "CONTOSO.METER_ID",
+      "ruleStatus": "Enabled",
+      "classificationAction": "Keep",
+      "minimumPercentageMatch": 60.0,
+      "minimumDistinctMatchCount": 8,
+      "dataPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": "^[A-Z]{2}[0-9]{6}$"
+        }
+      ],
+      "columnPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": ".*id.*"
+        }
+      ],
+      "createdAt": "2025-01-05T10:00:00Z",
+      "lastModifiedAt": "2025-06-05T10:00:00Z"
+    }
+  },
+  {
+    "id": "/classificationrules/CONTOSO.CUSTOMER_ACCOUNT",
+    "name": "CONTOSO.CUSTOMER_ACCOUNT",
+    "kind": "Custom",
+    "properties": {
+      "description": "Rule for CONTOSO.CUSTOMER_ACCOUNT",
+      "version": 6,
+      "classificationName": "CONTOSO.CUSTOMER_ACCOUNT",
+      "ruleStatus": "Enabled",
+      "classificationAction": "Keep",
+      "minimumPercentageMatch": 60.0,
+      "minimumDistinctMatchCount": 8,
+      "dataPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": "^[A-Z]{2}[0-9]{6}$"
+        }
+      ],
+      "columnPatterns": [
+        {
+          "kind": "Regex",
+          "pattern": ".*id.*"
+        }
+      ],
+      "createdAt": "2025-01-06T10:00:00Z",
+      "lastModifiedAt": "2025-06-06T10:00:00Z"
+    }
+  }
+]

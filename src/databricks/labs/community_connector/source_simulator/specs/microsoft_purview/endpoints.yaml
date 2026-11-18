@@ -5,6 +5,10 @@
 #   * read_table(business_domains) -> GET /datagovernance/catalog/businessdomains
 #   * read_table(data_products)    -> GET /datagovernance/catalog/dataProducts
 #   * read_table(terms)            -> GET /datagovernance/catalog/terms
+#   * read_table(classifications)        -> GET  /datamap/api/atlas/v2/types/typedefs
+#   * read_table(classification_rules)   -> GET  /scan/classificationrules
+#   * read_table(asset_classifications)  -> POST /datamap/api/search/query
+#   * read_table(asset_tags)             -> POST /datamap/api/search/query
 #
 # Pagination:
 #   All three list endpoints wrap records in a ``value`` array. Verified live:
@@ -77,3 +81,48 @@ endpoints:
       cursor_field: systemData.lastModifiedAt
       count: 3
 
+
+  # ===================================================================== #
+  # Data Map (Atlas) + Scanning endpoints (api-version=2023-09-01), served
+  # from the per-account host https://{account}.purview.azure.com. The
+  # simulator matches on path only, so the host comes from replay_config's
+  # ``purview_account_name``. All four tables are snapshots.
+  # ===================================================================== #
+
+  # ---- classifications: typedefs filtered to classification defs ----
+  - path: "/datamap/api/atlas/v2/types/typedefs"
+    method: GET
+    corpus: classifications
+    response:
+      pagination_style: none
+      wrapper: {records_key: classificationDefs}
+    params:
+      api-version:  {role: ignore}
+      type:         {role: ignore}
+
+  # ---- classification_rules: Scanning list (nextLink continuation) ----
+  # The simulator has no nextLink style; the whole corpus is served in a
+  # single ``value`` page with no nextLink (same modelling as businessdomains).
+  - path: "/scan/classificationrules"
+    method: GET
+    corpus: classification_rules
+    response:
+      pagination_style: none
+      wrapper: {records_key: value}
+    params:
+      api-version:  {role: ignore}
+
+  # ---- asset_classifications / asset_tags: Discovery search ----
+  # POST body (keywords / filter / limit / continuationToken) is not
+  # interpreted by the simulator; the whole corpus is returned in one
+  # ``value`` page with no continuationToken, so the connector stops after
+  # one call. Each record carries both ``classification[]`` and ``label[]``
+  # so one corpus backs both tables.
+  - path: "/datamap/api/search/query"
+    method: POST
+    corpus: search_assets
+    response:
+      pagination_style: none
+      wrapper: {records_key: value}
+    params:
+      api-version:  {role: ignore}

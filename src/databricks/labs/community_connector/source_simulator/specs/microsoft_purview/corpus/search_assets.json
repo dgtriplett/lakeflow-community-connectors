@@ -1,0 +1,120 @@
+[
+  {
+    "id": "e0c1d2f3-0000-4000-9000-000000000000",
+    "qualifiedName": "databricks://adb-123.azuredatabricks.net/catalogs/main/schemas/crm/tables/t0",
+    "name": "t0",
+    "entityType": "databricks_table",
+    "objectType": "Tables",
+    "assetType": [
+      "Azure Databricks Unity Catalog"
+    ],
+    "collectionId": "contoso-pv",
+    "createTime": 1700000000000,
+    "updateTime": 1700000900000,
+    "classification": [
+      "MICROSOFT.PERSONAL.EMAIL",
+      "MICROSOFT.PERSONAL.NAME"
+    ],
+    "label": [
+      "finance"
+    ]
+  },
+  {
+    "id": "e0c1d2f3-0000-4000-9000-000000000001",
+    "qualifiedName": "databricks://adb-123.azuredatabricks.net/catalogs/main/schemas/crm/tables/t1",
+    "name": "t1",
+    "entityType": "databricks_table",
+    "objectType": "Tables",
+    "assetType": [
+      "Azure Databricks Unity Catalog"
+    ],
+    "collectionId": "contoso-pv",
+    "createTime": 1700000001000,
+    "updateTime": 1700000901000,
+    "classification": [
+      "MICROSOFT.PERSONAL.NAME",
+      "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER"
+    ],
+    "label": [
+      "finance",
+      "gdpr-relevant"
+    ]
+  },
+  {
+    "id": "e0c1d2f3-0000-4000-9000-000000000002",
+    "qualifiedName": "databricks://adb-123.azuredatabricks.net/catalogs/main/schemas/crm/tables/t2",
+    "name": "t2",
+    "entityType": "databricks_table",
+    "objectType": "Tables",
+    "assetType": [
+      "Azure Databricks Unity Catalog"
+    ],
+    "collectionId": "contoso-pv",
+    "createTime": 1700000002000,
+    "updateTime": 1700000902000,
+    "classification": [
+      "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+      "CONTOSO.EMPLOYEE_ID"
+    ],
+    "label": []
+  },
+  {
+    "id": "e0c1d2f3-0000-4000-9000-000000000003",
+    "qualifiedName": "databricks://adb-123.azuredatabricks.net/catalogs/main/schemas/crm/tables/t3",
+    "name": "t3",
+    "entityType": "databricks_table",
+    "objectType": "Tables",
+    "assetType": [
+      "Azure Databricks Unity Catalog"
+    ],
+    "collectionId": "contoso-pv",
+    "createTime": 1700000003000,
+    "updateTime": 1700000903000,
+    "classification": [
+      "MICROSOFT.PERSONAL.EMAIL",
+      "MICROSOFT.PERSONAL.NAME"
+    ],
+    "label": [
+      "finance",
+      "gdpr-relevant"
+    ]
+  },
+  {
+    "id": "e0c1d2f3-0000-4000-9000-000000000004",
+    "qualifiedName": "databricks://adb-123.azuredatabricks.net/catalogs/main/schemas/crm/tables/t4",
+    "name": "t4",
+    "entityType": "databricks_table",
+    "objectType": "Tables",
+    "assetType": [
+      "Azure Databricks Unity Catalog"
+    ],
+    "collectionId": "contoso-pv",
+    "createTime": 1700000004000,
+    "updateTime": 1700000904000,
+    "classification": [
+      "MICROSOFT.PERSONAL.NAME",
+      "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER"
+    ],
+    "label": [
+      "finance"
+    ]
+  },
+  {
+    "id": "e0c1d2f3-0000-4000-9000-000000000005",
+    "qualifiedName": "databricks://adb-123.azuredatabricks.net/catalogs/main/schemas/crm/tables/t5",
+    "name": "t5",
+    "entityType": "databricks_table",
+    "objectType": "Tables",
+    "assetType": [
+      "Azure Databricks Unity Catalog"
+    ],
+    "collectionId": "contoso-pv",
+    "createTime": 1700000005000,
+    "updateTime": 1700000905000,
+    "classification": [],
+    "label": [
+      "finance",
+      "gdpr-relevant"
+    ]
+  }
+]

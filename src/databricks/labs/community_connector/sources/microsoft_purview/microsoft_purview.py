@@ -1,53 +1,51 @@
 """Microsoft Purview connector (read-only).
 
-Ingests governed business metadata from the Microsoft Purview **Unified
-Catalog Data Governance** REST API (data plane,
-``api-version=2026-03-20-preview``, public preview) into Unity Catalog.
-Implements the standard ``LakeflowConnect`` interface (single-driver reads).
+Ingests governed metadata from Microsoft Purview into Unity Catalog via the
+standard ``LakeflowConnect`` interface (single-driver reads), from two
+data-plane surfaces:
+
+1. **Unified Catalog Data Governance** REST API (``api-version=2026-03-20-preview``,
+   public preview, shared host ``https://api.purview-service.microsoft.com``):
+   ``business_domains``, ``data_products``, ``terms``.
+2. **Data Map (Atlas) + Scanning** REST APIs (``api-version=2023-09-01``, GA,
+   per-account host ``https://{account}.purview.azure.com``):
+   ``classifications`` (classification type definitions),
+   ``classification_rules`` (system + custom scan rules),
+   ``asset_classifications`` (classifications applied to assets) and
+   ``asset_tags`` (free-form asset tags / labels). These are only read when the
+   connection supplies ``purview_account_name`` or ``datamap_endpoint``.
 
 Why not ``SupportsPartitionedStream``?
     The partitioned-stream pattern exists to parallelise **server-side
-    time-range** queries (``since``/``until``) across executors. The Unified
-    Catalog list endpoints this connector uses
-    (``/datagovernance/catalog/businessdomains``, ``.../dataProducts``,
-    ``.../terms``) accept only ``skip`` / ``top`` / ``orderBy`` / ``$skipToken``
-    — there is **no server-side ``lastModifiedAt`` range filter**. Time-window
-    partitioning would force every executor to full-scan the whole collection
-    and filter client-side, multiplying total work by the number of partitions
-    for no benefit. This is the same situation as the Collibra connector; the
-    standard single-driver path with client-side incremental filtering is the
-    correct fit here. (The older Atlas Data Map ``/search/query`` endpoint does
-    support a server-side ``updateTime`` filter, but this connector targets the
-    newer Unified Catalog governance surface per the connector design.)
+    time-range** queries across executors. The Unified Catalog list endpoints
+    accept only ``skip`` / ``top`` / ``orderBy`` / ``$skipToken`` -- there is
+    no server-side ``lastModifiedAt`` range filter -- so time-window
+    partitioning would multiply work for no benefit. The Data Map tables are
+    low-volume definition sets or snapshot assignment sets and are read
+    sequentially too.
 
 Auth (m2m OAuth, offloaded to Unity Catalog):
-    Purview data-plane APIs use Azure Entra ID (formerly Azure AD) OAuth 2.0
-    client-credentials against ``https://login.microsoftonline.com/{tenant_id}``
-    with scope ``https://purview.azure.net/.default``. The UC COMMUNITY
-    connection runs the token exchange and refresh server-side and injects a
-    fresh bearer token as ``access_token`` at query time; the connector simply
-    sends ``Authorization: Bearer {access_token}`` and never holds the client
-    secret or runs the token flow itself. A ``token`` fallback is accepted for
-    ad-hoc / personal-token use.
+    Purview data-plane APIs (Unified Catalog, Data Map and Scanning alike) use
+    Azure Entra ID OAuth 2.0 client-credentials with scope
+    ``https://purview.azure.net/.default``. The UC COMMUNITY connection runs
+    the token exchange and refresh server-side and injects a fresh bearer
+    token as ``access_token`` at query time; the connector simply sends
+    ``Authorization: Bearer {access_token}``. A ``token`` fallback is accepted
+    for ad-hoc / personal-token use.
 
 Incremental model:
     ``data_products`` and ``terms`` are ``cdc`` on the
-    ``systemData.lastModifiedAt`` cursor (ISO-8601 UTC date-time string, which
-    is lexicographically ordered). The Unified Catalog list endpoints do not
-    accept a server-side modified-since filter and their ``orderBy`` support
-    for the nested ``systemData/lastModifiedAt`` path is unverified against a
-    live tenant, so the cursor is applied CLIENT-SIDE and the connector drains
-    the full collection per run rather than truncating by count on an
-    unordered slice (needs-live-testing: confirm ``orderBy`` on the cursor
-    path to enable safe count-based batching). An init-time upper bound
-    (``self._init_ts``) caps the returned cursor so a Trigger.AvailableNow
-    microbatch terminates. ``business_domains`` is a ``snapshot`` (low-volume
-    governance taxonomy).
+    ``systemData.lastModifiedAt`` cursor (ISO-8601 UTC string), applied
+    CLIENT-SIDE with an init-time upper bound (``self._init_ts``) so a
+    Trigger.AvailableNow microbatch terminates. ``business_domains`` and all
+    four Data Map tables are ``snapshot``.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Iterator
+from urllib.parse import urlparse
 
 import requests
 from pyspark.sql.types import StructType
@@ -55,18 +53,25 @@ from pyspark.sql.types import StructType
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.microsoft_purview.microsoft_purview_schemas import (  # pylint: disable=line-too-long
     API_VERSION,
+    DATAMAP_API_VERSION,
+    DATAMAP_TABLES,
     DEFAULT_ENDPOINT,
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
+    SCAN_API_VERSION,
+    SEARCH_PAGE_SIZE,
     SUPPORTED_TABLES,
     TABLE_METADATA,
     TABLE_SCHEMAS,
 )
 from databricks.labs.community_connector.sources.microsoft_purview.microsoft_purview_utils import (  # pylint: disable=line-too-long
+    api_get,
+    continuation_paginate,
     empty_structs_to_none,
     next_link_paginate,
     normalize_contacts,
     skip_top_paginate,
+    to_long,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -75,16 +80,26 @@ _LOG = logging.getLogger(__name__)
 # survives being copied into a workspace or merged into a single file, where
 # package metadata isn't available. Must equal `version` in pyproject.toml; a
 # unit test enforces that. Answers "which version is my pipeline running?"
-CONNECTOR_VERSION = "1.0.1"
+CONNECTOR_VERSION = "1.1.0"
 
 DEFAULT_MAX_RECORDS_PER_BATCH = 5000
 
 # Catalog path prefixes (relative to the data-plane endpoint).
 _CATALOG_BASE = "/datagovernance/catalog"
 
+# Search-filter table options -> Discovery filter keys. Each option accepts a
+# comma-separated list (OR'd); options are AND'd together.
+_SEARCH_FILTER_OPTIONS = {
+    "asset_type": "assetType",  # e.g. "Azure Databricks Unity Catalog"
+    "object_type": "objectType",  # e.g. "Tables"
+    "entity_type": "entityType",  # e.g. "databricks_table"
+    "collection_id": "collectionId",
+    "classification": "classification",  # e.g. "MICROSOFT.PERSONAL.EMAIL"
+}
+
 
 class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
-    """LakeflowConnect implementation for the Purview Unified Catalog API."""
+    """LakeflowConnect implementation for the Purview data-plane APIs."""
 
     # The connector is constructed many times per run (per table and batch),
     # so the version is logged once per process rather than on every init.
@@ -94,15 +109,17 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         """Initialize the Microsoft Purview connector.
 
         Expected options:
-            - tenant_id: Azure Entra (AAD) tenant ID/GUID. Used for row
-              disambiguation and (server-side, by UC) as the token-endpoint
-              interpolation value. Required.
+            - tenant_id: Azure Entra (AAD) tenant ID/GUID. Required.
             - endpoint: Unified Catalog data-plane base URL. Defaults to the
               shared ``https://api.purview-service.microsoft.com``.
-            - access_token: OAuth 2.0 bearer token, minted and injected by the
-              UC COMMUNITY connection (m2m / client-credentials).
-            - token: personal/API token fallback used the same way as
-              ``access_token`` (``Authorization: Bearer``) for ad-hoc use.
+            - purview_account_name: Purview account name; builds the Data Map /
+              Scanning host ``https://{name}.purview.azure.com``. Required only
+              for the Data Map tables.
+            - datamap_endpoint: full Data Map base URL override (takes
+              precedence over ``purview_account_name``).
+            - access_token: OAuth 2.0 bearer token, injected by the UC
+              COMMUNITY connection (m2m / client-credentials).
+            - token: personal/API token fallback (``Authorization: Bearer``).
             - page_size: ``top`` page size for skip/top-paginated endpoints.
         """
         super().__init__(options)
@@ -119,6 +136,21 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
 
         endpoint = options.get("endpoint") or DEFAULT_ENDPOINT
         self.endpoint = endpoint.rstrip("/")
+
+        # Data Map (Atlas) + Scanning host for classifications / tags / rules.
+        # Optional: only required when one of DATAMAP_TABLES is read, so
+        # existing Unified-Catalog-only pipelines are unaffected.
+        account_name = options.get("purview_account_name")
+        datamap_endpoint = options.get("datamap_endpoint") or (
+            f"https://{account_name}.purview.azure.com" if account_name else None
+        )
+        self.datamap_endpoint = (
+            datamap_endpoint.rstrip("/") if datamap_endpoint else None
+        )
+        host = (
+            urlparse(self.datamap_endpoint).hostname if self.datamap_endpoint else None
+        )
+        self.purview_account = account_name or (host.split(".")[0] if host else None)
 
         try:
             self._page_size = max(
@@ -138,9 +170,8 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         # Cap incremental cursors at init time so a single Trigger.AvailableNow
         # run only drains data that existed when the connector started; data
         # modified after this point is picked up by the next trigger with a
-        # fresh _init_ts. This is the termination guard. ISO-8601 UTC string to
-        # match the systemData.lastModifiedAt cursor unit (ISO strings compare
-        # lexicographically).
+        # fresh _init_ts. ISO-8601 UTC string to match the
+        # systemData.lastModifiedAt cursor unit.
         self._init_ts = datetime.now(timezone.utc).isoformat()
 
     def _configure_auth(self, options: dict[str, str]) -> None:
@@ -148,8 +179,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
 
         ``access_token`` (OAuth m2m, UC-injected) takes precedence; ``token``
         is an equivalent personal-token fallback. The connector never runs the
-        OAuth client-credentials exchange itself — that is offloaded to Unity
-        Catalog, mirroring the Azure DevOps ``service_principal`` model.
+        OAuth client-credentials exchange itself.
         """
         access_token = options.get("access_token") or options.get("token")
         if not access_token:
@@ -191,10 +221,20 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
             return self._read_data_products(start_offset, table_options)
         if table_name == "terms":
             return self._read_terms(start_offset, table_options)
+        if table_name in DATAMAP_TABLES:
+            self._require_datamap(table_name)
+        if table_name == "classifications":
+            return self._read_classifications(table_options)
+        if table_name == "classification_rules":
+            return self._read_classification_rules(table_options)
+        if table_name == "asset_classifications":
+            return self._read_asset_classifications(table_options)
+        if table_name == "asset_tags":
+            return self._read_asset_tags(table_options)
         raise ValueError(f"Unsupported table: {table_name!r}")
 
     # ------------------------------------------------------------------ #
-    # Table readers
+    # Unified Catalog table readers
     # ------------------------------------------------------------------ #
 
     def _read_business_domains(
@@ -220,8 +260,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         """Read data products incrementally on ``systemData.lastModifiedAt``.
 
-        Paginated by advancing ``skip`` (``top`` = page size); the endpoint
-        returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
+        Paginated by advancing ``skip`` (``top`` = page size). Optional
         ``domain_id`` scopes to a single governance domain.
         """
         params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -241,8 +280,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         """Read glossary terms incrementally on ``systemData.lastModifiedAt``.
 
-        Paginated by advancing ``skip`` (``top`` = page size); the endpoint
-        returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
+        Paginated by advancing ``skip`` (``top`` = page size). Optional
         ``domain_id`` / ``parent_id`` / ``keyword`` narrow the extract.
         """
         params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -262,6 +300,232 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         )
 
     # ------------------------------------------------------------------ #
+    # Data Map / Scanning readers (classifications, rules, asset tags)
+    # ------------------------------------------------------------------ #
+
+    def _require_datamap(self, table_name: str) -> None:
+        if not self.datamap_endpoint:
+            raise ValueError(
+                f"Table {table_name!r} reads the Purview Data Map API and "
+                "requires 'purview_account_name' (or 'datamap_endpoint', e.g. "
+                "https://<account>.purview.azure.com) on the connection."
+            )
+
+    def _stamp(self, rec: dict[str, Any]) -> dict[str, Any]:
+        rec["purview_account"] = self.purview_account
+        rec["purview_tenant_id"] = self.tenant_id
+        return rec
+
+    def _read_classifications(
+        self, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        """Classification type definitions (system MICROSOFT.* + custom).
+
+        Option ``include_system=false`` drops the built-in MICROSOFT.* set.
+        """
+        url = f"{self.datamap_endpoint}/datamap/api/atlas/v2/types/typedefs"
+        params = {"api-version": DATAMAP_API_VERSION, "type": "classification"}
+        body = api_get(self._session, url, params, "classifications")
+        include_system = (
+            str(table_options.get("include_system", "true")).lower() != "false"
+        )
+        records: list[dict[str, Any]] = []
+        for raw in body.get("classificationDefs") or []:
+            if not isinstance(raw, dict) or not raw.get("guid"):
+                continue
+            rec = self._shape_classification(raw)
+            if not include_system and rec["is_system"]:
+                continue
+            records.append(rec)
+        return iter(records), {}
+
+    def _shape_classification(self, raw: dict[str, Any]) -> dict[str, Any]:
+        rec: dict[str, Any] = {
+            k: raw.get(k)
+            for k in (
+                "guid",
+                "name",
+                "description",
+                "category",
+                "serviceType",
+                "typeVersion",
+                "createdBy",
+                "updatedBy",
+                "lastModifiedTS",
+                "superTypes",
+                "subTypes",
+                "entityTypes",
+            )
+        }
+        rec["version"] = to_long(raw.get("version"))
+        rec["createTime"] = to_long(raw.get("createTime"))
+        rec["updateTime"] = to_long(raw.get("updateTime"))
+        attribute_defs = [
+            {
+                "name": a.get("name"),
+                "typeName": a.get("typeName"),
+                "description": a.get("description"),
+                "isOptional": a.get("isOptional"),
+                "cardinality": a.get("cardinality"),
+                "isUnique": a.get("isUnique"),
+                "isIndexable": a.get("isIndexable"),
+                "defaultValue": (
+                    None if a.get("defaultValue") is None else str(a["defaultValue"])
+                ),
+            }
+            for a in (raw.get("attributeDefs") or [])
+            if isinstance(a, dict)
+        ]
+        rec["attributeDefs"] = attribute_defs or None
+        rec["options_json"] = json.dumps(raw["options"]) if raw.get("options") else None
+        rec["is_system"] = (raw.get("name") or "").upper().startswith("MICROSOFT.")
+        return self._stamp(rec)
+
+    def _read_classification_rules(
+        self, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        """System + custom classification (scan) rules from the Scanning API.
+
+        Option ``rule_kind`` = ``System`` | ``Custom`` filters client-side.
+        """
+        url = f"{self.datamap_endpoint}/scan/classificationrules"
+        params = {"api-version": SCAN_API_VERSION}
+        kind_filter = (table_options.get("rule_kind") or "").strip().lower()
+        records: list[dict[str, Any]] = []
+        for raw in next_link_paginate(
+            self._session, url, params, "classification_rules"
+        ):
+            if not isinstance(raw, dict) or not raw.get("name"):
+                continue
+            if kind_filter and (raw.get("kind") or "").lower() != kind_filter:
+                continue
+            records.append(self._shape_classification_rule(raw))
+        return iter(records), {}
+
+    def _shape_classification_rule(self, raw: dict[str, Any]) -> dict[str, Any]:
+        props = raw.get("properties") or {}
+
+        def _patterns(value: Any) -> list[dict[str, Any]] | None:
+            out = [
+                {"kind": p.get("kind"), "pattern": p.get("pattern")}
+                for p in (value or [])
+                if isinstance(p, dict)
+            ]
+            return out or None
+
+        pct = props.get("minimumPercentageMatch")
+        try:
+            pct_value = float(pct) if pct is not None else None
+        except (TypeError, ValueError):
+            pct_value = None
+        rec = {
+            "name": raw.get("name"),
+            "id": raw.get("id"),
+            "kind": raw.get("kind"),
+            "description": props.get("description"),
+            "version": to_long(props.get("version")),
+            "classificationName": props.get("classificationName"),
+            "ruleStatus": props.get("ruleStatus"),
+            "classificationAction": props.get("classificationAction"),
+            "minimumPercentageMatch": pct_value,
+            "minimumDistinctMatchCount": to_long(props.get("minimumDistinctMatchCount")),
+            "dataPatterns": _patterns(props.get("dataPatterns")),
+            "columnPatterns": _patterns(props.get("columnPatterns")),
+            "createdAt": props.get("createdAt"),
+            "lastModifiedAt": props.get("lastModifiedAt"),
+        }
+        return self._stamp(rec)
+
+    @staticmethod
+    def _build_search_filter(table_options: dict[str, str]) -> dict | None:
+        """Translate table options into a Discovery ``filter`` expression."""
+        clauses: list[dict[str, Any]] = []
+        for opt, key in _SEARCH_FILTER_OPTIONS.items():
+            raw = table_options.get(opt)
+            if not raw:
+                continue
+            values = [v.strip() for v in str(raw).split(",") if v.strip()]
+            if len(values) == 1:
+                clauses.append({key: values[0]})
+            elif values:
+                clauses.append({"or": [{key: v} for v in values]})
+        if not clauses:
+            return None
+        return clauses[0] if len(clauses) == 1 else {"and": clauses}
+
+    def _search_assets(
+        self, table_options: dict[str, str], label: str
+    ) -> Iterator[dict[str, Any]]:
+        url = f"{self.datamap_endpoint}/datamap/api/search/query"
+        params = {"api-version": DATAMAP_API_VERSION}
+        body: dict[str, Any] = {
+            "keywords": table_options.get("keywords") or "*",
+            "limit": SEARCH_PAGE_SIZE,
+        }
+        search_filter = self._build_search_filter(table_options)
+        if search_filter:
+            body["filter"] = search_filter
+        return continuation_paginate(self._session, url, params, body, label)
+
+    @staticmethod
+    def _shape_search_asset(raw: dict[str, Any]) -> dict[str, Any]:
+        asset_type = raw.get("assetType")
+        if isinstance(asset_type, str):
+            asset_type = [asset_type]
+        return {
+            "entity_guid": raw.get("id"),
+            "qualified_name": raw.get("qualifiedName"),
+            "entity_name": raw.get("name"),
+            "entity_type": raw.get("entityType"),
+            "object_type": raw.get("objectType"),
+            "asset_type": asset_type or None,
+            "collection_id": raw.get("collectionId"),
+            "create_time": to_long(raw.get("createTime")),
+            "update_time": to_long(raw.get("updateTime")),
+        }
+
+    def _explode_search(
+        self,
+        table_options: dict[str, str],
+        label: str,
+        source_key: str,
+        out_col: str,
+    ) -> tuple[Iterator[dict], dict]:
+        """One row per (asset, value), deduped on the composite primary key."""
+        rows: dict[tuple[str, str], dict[str, Any]] = {}
+        for raw in self._search_assets(table_options, label):
+            if not isinstance(raw, dict) or not raw.get("id"):
+                continue
+            values = raw.get(source_key) or []
+            if isinstance(values, str):
+                values = [values]
+            if not values:
+                continue
+            base = self._shape_search_asset(raw)
+            for value in values:
+                if not isinstance(value, str) or not value:
+                    continue
+                rows[(base["entity_guid"], value)] = self._stamp(
+                    {**base, out_col: value}
+                )
+        return iter(rows.values()), {}
+
+    def _read_asset_classifications(
+        self, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        return self._explode_search(
+            table_options,
+            "asset_classifications",
+            "classification",
+            "classification_name",
+        )
+
+    def _read_asset_tags(
+        self, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        return self._explode_search(table_options, "asset_tags", "label", "tag")
+
+    # ------------------------------------------------------------------ #
     # Incremental engine
     # ------------------------------------------------------------------ #
 
@@ -274,38 +538,27 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         """Apply the client-side incremental cursor over a record iterator.
 
         Applies, per record:
-          * strict ``> since`` filtering (skip records at or below the watermark)
-            so a resumed run never re-emits the boundary record — required by the
-            ``SimpleDataSourceStreamReader`` contract that a non-empty batch must
-            advance the end offset past the start (a boundary record, cursor ==
-            since, cannot be returned without advancing the offset).
+          * strict ``> since`` filtering (skip records at or below the
+            watermark) so a resumed run never re-emits the boundary record --
+            required by the ``SimpleDataSourceStreamReader`` contract that a
+            non-empty batch must advance the end offset past the start.
             ``systemData.lastModifiedAt`` has sub-second (100-ns) precision, so
-            distinct records effectively never share a cursor value and nothing is
-            lost by the strict skip; and
+            distinct records effectively never share a cursor value; and
           * an init-time upper cap (skip records modified after
             ``self._init_ts``) so Trigger.AvailableNow terminates.
 
-        The Unified Catalog list endpoints do not accept a server-side
-        modified-since filter, and ``orderBy`` on the nested
-        ``systemData/lastModifiedAt`` path is unverified against a live tenant,
-        so records are treated as **not** cursor-sorted: we drain the full
-        collection per run (bounded only by the ``self._init_ts`` cap) rather
-        than truncating by count on an unordered slice. Count-based truncation
-        of an unordered slice would advance the watermark to an arbitrary max
-        and silently drop not-yet-seen records at or below it. CDC upsert on
-        the primary key tolerates the resulting re-reads. (needs-live-testing:
-        once ``orderBy=systemData/lastModifiedAt asc`` is confirmed, this can
-        switch to a soft, tie-group-aware count cap like Collibra's sorted
-        path.)
+        Records are treated as **not** cursor-sorted (``orderBy`` on the nested
+        cursor path is unverified live), so the full collection is drained per
+        run rather than truncated by count. CDC upsert on the primary key
+        tolerates the resulting re-reads.
 
         Returns ``(records, end_offset)``. When nothing new is emitted, the
-        offset is returned unchanged so ``end_offset == start_offset`` and the
-        trigger converges.
+        offset is returned unchanged so the trigger converges.
         """
         start_offset = start_offset or {}
         since = start_offset.get("cursor")
 
-        # Already caught up to init time — nothing new can be emitted.
+        # Already caught up to init time -- nothing new can be emitted.
         if since is not None and since >= self._init_ts:
             return iter([]), start_offset
 
@@ -313,16 +566,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         max_seen = since
         for raw in record_iter:
             cursor = self._record_cursor(raw)
-            # Strict `>` boundary: skip records at or below the watermark so a
-            # resumed run never re-emits the boundary record. This is required by
-            # the SimpleDataSourceStreamReader contract — a non-empty batch MUST
-            # advance the end offset past the start; re-emitting a boundary record
-            # (cursor == since) would return records without advancing the offset
-            # and the pipeline aborts (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE).
-            # This is safe against the "same-timestamp record lost" concern because
-            # systemData.lastModifiedAt carries sub-second (100-ns) precision (e.g.
-            # 2026-09-22T20:32:33.4438881Z), so distinct records effectively never
-            # share an exact cursor value.
+            # Strict `>` boundary (see docstring).
             if since is not None and cursor is not None and cursor <= since:
                 continue
             # Init-time cap: skip records modified after the connector started.
@@ -334,7 +578,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
                 max_seen = cursor
 
         if not records or max_seen is None or max_seen == since:
-            # No forward progress — return the offset unchanged so the
+            # No forward progress -- return the offset unchanged so the
             # framework sees end_offset == start_offset and terminates.
             return iter(records), start_offset
 
@@ -355,7 +599,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         return None
 
     # ------------------------------------------------------------------ #
-    # Record shaping
+    # Record shaping (Unified Catalog)
     # ------------------------------------------------------------------ #
 
     def _shape_business_domain(self, raw: dict[str, Any]) -> dict[str, Any]:

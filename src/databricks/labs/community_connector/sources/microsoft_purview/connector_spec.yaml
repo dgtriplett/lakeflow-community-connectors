@@ -26,16 +26,19 @@ connection:
           required: true
           secret: true
           description: >
-            Bearer token for the Purview Unified Catalog data-plane API.
+            Bearer token for the Purview data-plane APIs.
             Passed as "Authorization: Bearer {token}" on all requests.
 
     - name: service_principal
       description: >
         Authenticate as an Azure Entra (AAD) service principal using the
-        OAuth 2.0 client-credentials (m2m) flow — no interactive user. The
+        OAuth 2.0 client-credentials (m2m) flow - no interactive user. The
         service principal must be assigned a Purview Unified Catalog data-plane
-        role (e.g. Data Catalog Reader). The token is minted and refreshed by
-        the Unity Catalog connection; the connector receives it as access_token.
+        role (e.g. Data Catalog Reader) and, for the Data Map tables, Data
+        Reader on the root collection (classification rules may additionally
+        require Data Source Administrator). The token is minted and refreshed
+        by the Unity Catalog connection; the connector receives it as
+        access_token.
       parameters:
         - name: client_id
           type: string
@@ -70,6 +73,22 @@ connection:
         https://api.purview-service.microsoft.com. Override only for sovereign
         or non-public clouds.
 
+    - name: purview_account_name
+      type: string
+      required: false
+      description: >
+        Purview account name (e.g. contoso-purview). Builds the Data Map /
+        Scanning endpoint https://{name}.purview.azure.com used by the
+        classifications, classification_rules, asset_classifications and
+        asset_tags tables. Not needed for the Unified Catalog tables.
+
+    - name: datamap_endpoint
+      type: string
+      required: false
+      description: >
+        Full Data Map / Scanning base URL override (e.g. for sovereign clouds).
+        Takes precedence over purview_account_name.
+
     - name: page_size
       type: string
       required: false
@@ -83,10 +102,9 @@ connection:
   #               community_oauth_flow=m2m; UC runs the exchange + refresh
   #               server-side and injects `access_token` at query time.
   #   token_url - Azure Entra token endpoint. `{tenant_id}` is interpolated
-  #               from the user-supplied tenant_id option by the CLI (same
-  #               templating as the Azure DevOps connector's `{tenant_id}`).
-  #   scopes    - Purview data plane resource scope. Entra v2 endpoint uses the
-  #               `.default` scope for client-credentials.
+  #               from the user-supplied tenant_id option by the CLI.
+  #   scopes    - Purview data plane resource scope (shared by Unified Catalog,
+  #               Data Map and Scanning APIs).
   # ---------------------------------------------------------------------------
   oauth:
     flow: m2m
@@ -99,5 +117,4 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "domain_id,parent_id,keyword,order_by,write_only,page_size"
-
+external_options_allowlist: "domain_id,parent_id,keyword,order_by,write_only,page_size,asset_type,object_type,entity_type,collection_id,classification,keywords,include_system,rule_kind"

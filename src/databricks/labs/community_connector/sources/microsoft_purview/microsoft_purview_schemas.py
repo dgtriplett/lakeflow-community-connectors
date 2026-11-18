@@ -1,28 +1,28 @@
 """Static schema definitions and table metadata for the Microsoft Purview connector.
 
-Schemas are derived from the Microsoft Purview **Unified Catalog Data Governance**
-REST API (data plane, ``api-version=2026-03-20-preview``). See
-``microsoft_purview_api_doc.md`` and the live Microsoft Learn reference:
-https://learn.microsoft.com/en-us/rest/api/purview/purview-unified-catalog
+Schemas are derived from two Purview data-plane surfaces:
+
+* the **Unified Catalog Data Governance** REST API
+  (``api-version=2026-03-20-preview``) for ``business_domains``,
+  ``data_products`` and ``terms``; and
+* the **Data Map (Atlas) + Scanning** REST APIs (``api-version=2023-09-01``,
+  host ``https://{account}.purview.azure.com``) for ``classifications``,
+  ``classification_rules``, ``asset_classifications`` and ``asset_tags``.
+
+See ``microsoft_purview_api_doc.md`` and the Microsoft Learn reference:
+https://learn.microsoft.com/en-us/rest/api/purview/
 
 Design notes:
-    * UUID identifiers (``id``, ``domain``, ``parentId``, the ``id`` inside
-      contacts, and the ``*By`` audit fields inside ``systemData``) are
-      ``StringType`` — never cast UUIDs to binary/long.
-    * ``systemData.createdAt`` / ``systemData.lastModifiedAt`` /
-      ``systemData.expiredAt`` are ISO-8601 UTC date-time **strings** in this
-      API (not epoch ms like the older Atlas Data Map surface). They are kept
-      as ``StringType``; the incremental cursor sorts them lexicographically
-      (ISO-8601 UTC strings are lexicographically ordered).
-    * Nested objects (``systemData``, ``contacts``, ``thumbnail``,
-      ``additionalProperties``) are kept as ``StructType`` — never ``MapType``.
-    * Repeated objects (``contacts.owner``, ``termsOfUse``, ``domains``,
-      ``managedAttributes``, ...) are ``ArrayType(StructType(...))``.
-    * Integer-valued fields use ``LongType`` (never ``IntegerType``) to avoid
-      overflow: ``additionalProperties.assetCount`` is int64 in the API, and
-      ``activeSubscriberCount`` is kept ``LongType`` for headroom.
+    * UUID identifiers are ``StringType`` \u2014 never cast UUIDs to binary/long.
+    * Unified Catalog ``systemData.*At`` fields are ISO-8601 UTC strings; Data
+      Map ``createTime`` / ``updateTime`` are epoch-ms and kept as ``LongType``.
+    * Nested objects are kept as ``StructType`` \u2014 never ``MapType``. Free-form
+      maps whose keys are not known up front (classification ``options``) are
+      JSON-serialized into a ``*_json`` string column.
+    * Repeated objects are ``ArrayType(StructType(...))``.
+    * Integer-valued fields use ``LongType`` (never ``IntegerType``).
     * Every row carries a non-null ``purview_tenant_id`` column for
-      multi-tenant disambiguation (mirrors Collibra's ``collibra_org``).
+      multi-tenant disambiguation; Data Map rows also carry ``purview_account``.
 """
 
 from pyspark.sql.types import (
@@ -39,7 +39,7 @@ from pyspark.sql.types import (
 # Reusable nested struct definitions
 # =============================================================================
 
-# CatalogModelSystemDataWithExpired — audit metadata common to every catalog
+# CatalogModelSystemDataWithExpired \u2014 audit metadata common to every catalog
 # entity. ``*At`` fields are ISO-8601 UTC strings; ``*By`` fields are AAD oids.
 SYSTEM_DATA_STRUCT = StructType(
     [
@@ -53,7 +53,7 @@ SYSTEM_DATA_STRUCT = StructType(
     ]
 )
 
-# CatalogModelContactsValueInner — one contact assignment.
+# CatalogModelContactsValueInner \u2014 one contact assignment.
 CONTACT_STRUCT = StructType(
     [
         StructField("id", StringType(), True),
@@ -61,7 +61,7 @@ CONTACT_STRUCT = StructType(
     ]
 )
 
-# ContactsMap — contacts keyed by role. Kept as an explicit struct (not a map)
+# ContactsMap \u2014 contacts keyed by role. Kept as an explicit struct (not a map)
 # so each role is a first-class, typed array.
 CONTACTS_STRUCT = StructType(
     [
@@ -71,7 +71,7 @@ CONTACTS_STRUCT = StructType(
     ]
 )
 
-# CatalogModelExternalLink — used by data product termsOfUse / documentation.
+# CatalogModelExternalLink \u2014 used by data product termsOfUse / documentation.
 EXTERNAL_LINK_STRUCT = StructType(
     [
         StructField("url", StringType(), True),
@@ -80,7 +80,7 @@ EXTERNAL_LINK_STRUCT = StructType(
     ]
 )
 
-# CatalogModelManagedAttribute — governance custom attribute on any entity.
+# CatalogModelManagedAttribute \u2014 governance custom attribute on any entity.
 MANAGED_ATTRIBUTE_STRUCT = StructType(
     [
         StructField("name", StringType(), True),
@@ -89,7 +89,7 @@ MANAGED_ATTRIBUTE_STRUCT = StructType(
     ]
 )
 
-# CatalogModelTermResource — external resource link on a term.
+# CatalogModelTermResource \u2014 external resource link on a term.
 TERM_RESOURCE_STRUCT = StructType(
     [
         StructField("name", StringType(), True),
@@ -128,7 +128,7 @@ RELATED_COLLECTION_STRUCT = StructType(
     ]
 )
 
-# CatalogModelPlatformDomain — a physical-platform mapping under a domain.
+# CatalogModelPlatformDomain \u2014 a physical-platform mapping under a domain.
 PLATFORM_DOMAIN_STRUCT = StructType(
     [
         StructField("name", StringType(), True),
@@ -139,7 +139,7 @@ PLATFORM_DOMAIN_STRUCT = StructType(
 
 
 # =============================================================================
-# Table schemas
+# Table schemas \u2014 Unified Catalog
 # =============================================================================
 
 BUSINESS_DOMAINS_SCHEMA = StructType(
@@ -182,7 +182,7 @@ DATA_PRODUCTS_SCHEMA = StructType(
         StructField("systemData", SYSTEM_DATA_STRUCT, True),
         # Top-level copy of systemData.lastModifiedAt, promoted so it can serve
         # as the cdc sequence_by column (SDP APPLY CHANGES cannot resolve a
-        # nested/dotted sequence_by path — see CURSOR_FIELD note below).
+        # nested/dotted sequence_by path \u2014 see CURSOR_FIELD note below).
         StructField("last_modified_at", StringType(), True),
         StructField("purview_tenant_id", StringType(), False),
     ]
@@ -209,10 +209,124 @@ TERMS_SCHEMA = StructType(
 )
 
 
+# =============================================================================
+# Table schemas \u2014 Data Map (Atlas) + Scanning: classifications, tags, rules
+# =============================================================================
+
+# AtlasAttributeDef (subset) on a classification type definition.
+CLASSIFICATION_ATTRIBUTE_DEF_STRUCT = StructType(
+    [
+        StructField("name", StringType(), True),
+        StructField("typeName", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("isOptional", BooleanType(), True),
+        StructField("cardinality", StringType(), True),
+        StructField("isUnique", BooleanType(), True),
+        StructField("isIndexable", BooleanType(), True),
+        StructField("defaultValue", StringType(), True),
+    ]
+)
+
+# AtlasClassificationDef \u2014 GET /datamap/api/atlas/v2/types/typedefs?type=classification
+CLASSIFICATIONS_SCHEMA = StructType(
+    [
+        StructField("guid", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("category", StringType(), True),
+        StructField("serviceType", StringType(), True),
+        StructField("typeVersion", StringType(), True),
+        StructField("version", LongType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("updatedBy", StringType(), True),
+        StructField("createTime", LongType(), True),  # epoch ms
+        StructField("updateTime", LongType(), True),  # epoch ms
+        StructField("lastModifiedTS", StringType(), True),  # ETag counter, not a time
+        StructField("superTypes", ArrayType(StringType()), True),
+        StructField("subTypes", ArrayType(StringType()), True),
+        StructField("entityTypes", ArrayType(StringType()), True),
+        StructField("attributeDefs", ArrayType(CLASSIFICATION_ATTRIBUTE_DEF_STRUCT), True),
+        StructField("options_json", StringType(), True),  # free-form map as JSON
+        StructField("is_system", BooleanType(), True),  # MICROSOFT.* namespace
+        StructField("purview_account", StringType(), True),
+        StructField("purview_tenant_id", StringType(), False),
+    ]
+)
+
+# Regex pattern on a classification rule (dataPatterns / columnPatterns).
+RULE_PATTERN_STRUCT = StructType(
+    [
+        StructField("kind", StringType(), True),  # e.g. "Regex"
+        StructField("pattern", StringType(), True),
+    ]
+)
+
+# ClassificationRule (System | Custom) \u2014 GET /scan/classificationrules.
+# ``properties`` is flattened to top-level columns.
+CLASSIFICATION_RULES_SCHEMA = StructType(
+    [
+        StructField("name", StringType(), False),
+        StructField("id", StringType(), True),
+        StructField("kind", StringType(), True),  # System | Custom
+        StructField("description", StringType(), True),
+        StructField("version", LongType(), True),
+        StructField("classificationName", StringType(), True),  # -> classifications.name
+        StructField("ruleStatus", StringType(), True),  # Enabled | Disabled
+        StructField("classificationAction", StringType(), True),  # Keep | Delete
+        StructField("minimumPercentageMatch", DoubleType(), True),
+        StructField("minimumDistinctMatchCount", LongType(), True),
+        StructField("dataPatterns", ArrayType(RULE_PATTERN_STRUCT), True),
+        StructField("columnPatterns", ArrayType(RULE_PATTERN_STRUCT), True),
+        StructField("createdAt", StringType(), True),
+        StructField("lastModifiedAt", StringType(), True),
+        StructField("purview_account", StringType(), True),
+        StructField("purview_tenant_id", StringType(), False),
+    ]
+)
+
+# Asset identity columns shared by the search-derived tables
+# (POST /datamap/api/search/query result value[]).
+_SEARCH_ASSET_FIELDS = [
+    StructField("entity_guid", StringType(), False),
+    StructField("qualified_name", StringType(), True),
+    StructField("entity_name", StringType(), True),
+    StructField("entity_type", StringType(), True),
+    StructField("object_type", StringType(), True),
+    StructField("asset_type", ArrayType(StringType()), True),
+    StructField("collection_id", StringType(), True),
+    StructField("create_time", LongType(), True),  # epoch ms
+    StructField("update_time", LongType(), True),  # epoch ms
+]
+
+# One row per (asset, applied classification).
+ASSET_CLASSIFICATIONS_SCHEMA = StructType(
+    _SEARCH_ASSET_FIELDS
+    + [
+        StructField("classification_name", StringType(), False),
+        StructField("purview_account", StringType(), True),
+        StructField("purview_tenant_id", StringType(), False),
+    ]
+)
+
+# One row per (asset, tag). Purview exposes free-form asset tags as ``label``.
+ASSET_TAGS_SCHEMA = StructType(
+    _SEARCH_ASSET_FIELDS
+    + [
+        StructField("tag", StringType(), False),
+        StructField("purview_account", StringType(), True),
+        StructField("purview_tenant_id", StringType(), False),
+    ]
+)
+
+
 TABLE_SCHEMAS: dict[str, StructType] = {
     "business_domains": BUSINESS_DOMAINS_SCHEMA,
     "data_products": DATA_PRODUCTS_SCHEMA,
     "terms": TERMS_SCHEMA,
+    "classifications": CLASSIFICATIONS_SCHEMA,
+    "classification_rules": CLASSIFICATION_RULES_SCHEMA,
+    "asset_classifications": ASSET_CLASSIFICATIONS_SCHEMA,
+    "asset_tags": ASSET_TAGS_SCHEMA,
 }
 
 
@@ -231,7 +345,7 @@ TABLE_SCHEMAS: dict[str, StructType] = {
 CURSOR_FIELD = "last_modified_at"
 
 TABLE_METADATA: dict[str, dict] = {
-    # Governance domains are a low-volume taxonomy that changes infrequently —
+    # Governance domains are a low-volume taxonomy that changes infrequently \u2014
     # snapshotted in full each run (mirrors Collibra's ``domains``).
     "business_domains": {
         "primary_keys": ["id"],
@@ -247,10 +361,41 @@ TABLE_METADATA: dict[str, dict] = {
         "cursor_field": CURSOR_FIELD,
         "ingestion_type": "cdc",
     },
+    # Data Map / Scanning tables: low-volume definitions or assignment sets
+    # with no reliable server-side change feed \u2014 full snapshot each run.
+    "classifications": {
+        "primary_keys": ["guid"],
+        "ingestion_type": "snapshot",
+    },
+    "classification_rules": {
+        "primary_keys": ["name"],
+        "ingestion_type": "snapshot",
+    },
+    "asset_classifications": {
+        "primary_keys": ["entity_guid", "classification_name"],
+        "ingestion_type": "snapshot",
+    },
+    "asset_tags": {
+        "primary_keys": ["entity_guid", "tag"],
+        "ingestion_type": "snapshot",
+    },
 }
 
 
 SUPPORTED_TABLES: list[str] = list(TABLE_SCHEMAS.keys())
+
+# Tables served from the Data Map / Scanning host
+# (https://{account}.purview.azure.com) rather than the shared Unified Catalog
+# endpoint. Reading any of these requires ``purview_account_name`` or
+# ``datamap_endpoint`` on the connection.
+DATAMAP_TABLES: frozenset[str] = frozenset(
+    {
+        "classifications",
+        "classification_rules",
+        "asset_classifications",
+        "asset_tags",
+    }
+)
 
 
 # =============================================================================
@@ -262,6 +407,13 @@ API_VERSION = "2026-03-20-preview"
 
 # Shared data-plane endpoint for the Unified Catalog (not per-account).
 DEFAULT_ENDPOINT = "https://api.purview-service.microsoft.com"
+
+# Data Map (Atlas) + Scanning data-plane API versions (GA).
+DATAMAP_API_VERSION = "2023-09-01"
+SCAN_API_VERSION = "2023-09-01"
+
+# Discovery /search/query maximum page size.
+SEARCH_PAGE_SIZE = 1000
 
 # ``top`` page size for skip/top-paginated endpoints (dataProducts / terms).
 # The API does not document a hard max; 100 is a conservative default that

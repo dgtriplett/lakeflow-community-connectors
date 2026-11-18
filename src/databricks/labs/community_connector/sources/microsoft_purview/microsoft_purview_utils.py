@@ -12,9 +12,13 @@ models across the endpoints this connector uses:
   ``skip`` itself (``skip_top_paginate``). Following only ``nextLink`` here
   reads just the first page and silently truncates at ``top`` records.
 
-Both list shapes wrap records in a ``value`` array. ``next_link_paginate``
-handles the ``nextLink`` continuation; ``skip_top_paginate`` handles
-``skip``/``top`` (and still follows a ``nextLink`` if one is ever returned).
+The Data Map (Atlas) / Scanning surface used for classifications, tags and
+classification rules adds:
+
+* **``nextLink``** on ``/scan/classificationrules`` (handled by
+  ``next_link_paginate``).
+* **``continuationToken`` in the POST body** on the Discovery
+  ``/datamap/api/search/query`` endpoint (``continuation_paginate``).
 
 All requests carry an explicit ``timeout`` and retry on 429/5xx with
 exponential backoff (honouring ``Retry-After`` when present).
@@ -40,8 +44,11 @@ def request_with_retry(
     url: str,
     params: dict[str, str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    *,
+    method: str = "GET",
+    json_body: dict | None = None,
 ) -> requests.Response:
-    """Issue a GET with exponential backoff on retriable status codes.
+    """Issue a GET (default) or POST with exponential backoff on retriable codes.
 
     Honors the ``Retry-After`` header when present, otherwise doubles the
     backoff (1, 2, 4, 8, 16 s). Always passes an explicit ``timeout``.
@@ -49,7 +56,10 @@ def request_with_retry(
     backoff = INITIAL_BACKOFF
     resp = None
     for attempt in range(MAX_RETRIES):
-        resp = session.get(url, params=params, timeout=timeout)
+        if method == "POST":
+            resp = session.post(url, params=params, json=json_body, timeout=timeout)
+        else:
+            resp = session.get(url, params=params, timeout=timeout)
         if resp.status_code not in RETRIABLE_STATUS_CODES:
             return resp
 
@@ -82,6 +92,26 @@ def api_get(
     return response.json()
 
 
+def api_post(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str] | None,
+    json_body: dict,
+    label: str,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> dict:
+    """POST JSON and return parsed JSON, raising RuntimeError on non-200."""
+    response = request_with_retry(
+        session, url, params, timeout=timeout, method="POST", json_body=json_body
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Microsoft Purview API error for {label}: "
+            f"{response.status_code} {response.text}"
+        )
+    return response.json()
+
+
 def next_link_paginate(
     session: requests.Session,
     url: str,
@@ -91,17 +121,16 @@ def next_link_paginate(
     *,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> Iterator[dict[str, Any]]:
-    """Yield records from a ``nextLink``-paginated Unified Catalog endpoint.
+    """Yield records from a ``nextLink``-paginated endpoint.
 
     The first request uses ``url`` + ``params``; every subsequent page follows
-    the absolute ``nextLink`` URL from the previous ``PagedX`` body (which
-    already embeds ``api-version``, ``$skipToken``/``skip``, and any filters),
-    so ``params`` is only applied to the first call. Stops when ``nextLink`` is
-    absent or a page is empty.
+    the absolute ``nextLink`` URL from the previous body (which already embeds
+    ``api-version``, ``$skipToken``/``skip``, and any filters), so ``params``
+    is only applied to the first call. Stops when ``nextLink`` is absent or a
+    page is empty.
 
-    Used for ``businessdomains`` (``$skipToken`` continuation), ``dataProducts``
-    and ``terms`` (``skip``/``top``) — all three share the ``{value, nextLink}``
-    envelope.
+    Used for ``businessdomains`` (``$skipToken`` continuation) and the
+    Scanning ``classificationrules`` list.
     """
     page_params: dict[str, str] | None = dict(params)
     next_url: str | None = url
@@ -129,7 +158,7 @@ def skip_top_paginate(
     """Yield records from a ``skip`` / ``top`` paginated Unified Catalog endpoint.
 
     Live behaviour (verified against a Purview tenant): ``dataProducts`` and
-    ``terms`` return ``{value, count}`` and **no** ``nextLink`` — the caller
+    ``terms`` return ``{value, count}`` and **no** ``nextLink`` \u2014 the caller
     pages by advancing ``skip``. ``params`` must already carry ``top``.
 
     * ``skip`` advances by the number of records actually returned (not by
@@ -171,6 +200,47 @@ def skip_top_paginate(
         count = body.get("count")
         if isinstance(count, int) and skip >= count:
             return
+
+
+def continuation_paginate(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str],
+    body: dict,
+    label: str,
+    records_key: str = "value",
+    *,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Iterator[dict[str, Any]]:
+    """Yield records from the Data Map Discovery ``POST /search/query`` endpoint.
+
+    Pages by echoing the response's ``continuationToken`` back in the request
+    body. Stops when the token is absent/null, a page is empty, or a token
+    repeats (guard against a server loop).
+    """
+    token: str | None = None
+    seen: set[str] = set()
+    while True:
+        page_body = dict(body)
+        if token:
+            page_body["continuationToken"] = token
+        resp = api_post(session, url, params, page_body, label, timeout=timeout)
+        batch = resp.get(records_key) or []
+        yield from batch
+        token = resp.get("continuationToken")
+        if not batch or not token or token in seen:
+            return
+        seen.add(token)
+
+
+def to_long(value: Any) -> int | None:
+    """Coerce an epoch-ms / integer value (int, float, numeric str) to int."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def empty_structs_to_none(record: dict[str, Any], schema: Any) -> dict[str, Any]:

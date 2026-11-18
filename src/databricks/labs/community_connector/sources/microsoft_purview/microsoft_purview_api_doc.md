@@ -862,6 +862,24 @@ However, the connector should still handle token refresh defensively for very la
 > "Unified Catalog — Data Governance REST API" section). Governance domains and data products
 > **are** API-accessible (they were previously believed portal-only; that is no longer the case).
 
+**Data Map / Scanning tables shipped in v1.1.0** (host `https://{account}.purview.azure.com`,
+`api-version=2023-09-01`, GA; same Entra scope `https://purview.azure.net/.default`; require the
+`purview_account_name` or `datamap_endpoint` connection option):
+
+| Table | Endpoint | Pagination | PK | Ingestion Type |
+|---|---|---|---|---|
+| `classifications` | `GET /datamap/api/atlas/v2/types/typedefs?type=classification` → `classificationDefs[]` | none (single response) | `guid` | `snapshot` |
+| `classification_rules` | `GET /scan/classificationrules` → `value[]` | `nextLink` | `name` | `snapshot` |
+| `asset_classifications` | `POST /datamap/api/search/query` → `value[].classification[]` (exploded) | `continuationToken` echoed in the request body | `entity_guid`, `classification_name` | `snapshot` |
+| `asset_tags` | `POST /datamap/api/search/query` → `value[].label[]` (exploded) | `continuationToken` echoed in the request body | `entity_guid`, `tag` | `snapshot` |
+
+Search request body: `{"keywords": "*", "limit": 1000, "filter": {...}, "continuationToken": "..."}`.
+The `filter` is built from the `asset_type` / `object_type` / `entity_type` / `collection_id` /
+`classification` table options (`assetType`, `objectType`, `entityType`, `collectionId`,
+`classification` filter keys; comma-separated values become an `or`, multiple options an `and`).
+Required roles: **Data Reader** on the root collection; classification rules may additionally need
+**Data Source Administrator** (needs-live-testing).
+
 **Not yet covered** (Unified Catalog objects; candidates as the preview API surface expands):
 
 | Object | Status |

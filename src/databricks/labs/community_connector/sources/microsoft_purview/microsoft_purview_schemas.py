@@ -13,10 +13,10 @@ See ``microsoft_purview_api_doc.md`` and the Microsoft Learn reference:
 https://learn.microsoft.com/en-us/rest/api/purview/
 
 Design notes:
-    * UUID identifiers are ``StringType`` \u2014 never cast UUIDs to binary/long.
+    * UUID identifiers are ``StringType`` — never cast UUIDs to binary/long.
     * Unified Catalog ``systemData.*At`` fields are ISO-8601 UTC strings; Data
       Map ``createTime`` / ``updateTime`` are epoch-ms and kept as ``LongType``.
-    * Nested objects are kept as ``StructType`` \u2014 never ``MapType``. Free-form
+    * Nested objects are kept as ``StructType`` — never ``MapType``. Free-form
       maps whose keys are not known up front (classification ``options``) are
       JSON-serialized into a ``*_json`` string column.
     * Repeated objects are ``ArrayType(StructType(...))``.
@@ -39,7 +39,7 @@ from pyspark.sql.types import (
 # Reusable nested struct definitions
 # =============================================================================
 
-# CatalogModelSystemDataWithExpired \u2014 audit metadata common to every catalog
+# CatalogModelSystemDataWithExpired — audit metadata common to every catalog
 # entity. ``*At`` fields are ISO-8601 UTC strings; ``*By`` fields are AAD oids.
 SYSTEM_DATA_STRUCT = StructType(
     [
@@ -53,7 +53,7 @@ SYSTEM_DATA_STRUCT = StructType(
     ]
 )
 
-# CatalogModelContactsValueInner \u2014 one contact assignment.
+# CatalogModelContactsValueInner — one contact assignment.
 CONTACT_STRUCT = StructType(
     [
         StructField("id", StringType(), True),
@@ -61,7 +61,7 @@ CONTACT_STRUCT = StructType(
     ]
 )
 
-# ContactsMap \u2014 contacts keyed by role. Kept as an explicit struct (not a map)
+# ContactsMap — contacts keyed by role. Kept as an explicit struct (not a map)
 # so each role is a first-class, typed array.
 CONTACTS_STRUCT = StructType(
     [
@@ -71,7 +71,7 @@ CONTACTS_STRUCT = StructType(
     ]
 )
 
-# CatalogModelExternalLink \u2014 used by data product termsOfUse / documentation.
+# CatalogModelExternalLink — used by data product termsOfUse / documentation.
 EXTERNAL_LINK_STRUCT = StructType(
     [
         StructField("url", StringType(), True),
@@ -80,7 +80,7 @@ EXTERNAL_LINK_STRUCT = StructType(
     ]
 )
 
-# CatalogModelManagedAttribute \u2014 governance custom attribute on any entity.
+# CatalogModelManagedAttribute — governance custom attribute on any entity.
 MANAGED_ATTRIBUTE_STRUCT = StructType(
     [
         StructField("name", StringType(), True),
@@ -89,7 +89,7 @@ MANAGED_ATTRIBUTE_STRUCT = StructType(
     ]
 )
 
-# CatalogModelTermResource \u2014 external resource link on a term.
+# CatalogModelTermResource — external resource link on a term.
 TERM_RESOURCE_STRUCT = StructType(
     [
         StructField("name", StringType(), True),
@@ -128,7 +128,7 @@ RELATED_COLLECTION_STRUCT = StructType(
     ]
 )
 
-# CatalogModelPlatformDomain \u2014 a physical-platform mapping under a domain.
+# CatalogModelPlatformDomain — a physical-platform mapping under a domain.
 PLATFORM_DOMAIN_STRUCT = StructType(
     [
         StructField("name", StringType(), True),
@@ -139,7 +139,7 @@ PLATFORM_DOMAIN_STRUCT = StructType(
 
 
 # =============================================================================
-# Table schemas \u2014 Unified Catalog
+# Table schemas — Unified Catalog
 # =============================================================================
 
 BUSINESS_DOMAINS_SCHEMA = StructType(
@@ -182,7 +182,7 @@ DATA_PRODUCTS_SCHEMA = StructType(
         StructField("systemData", SYSTEM_DATA_STRUCT, True),
         # Top-level copy of systemData.lastModifiedAt, promoted so it can serve
         # as the cdc sequence_by column (SDP APPLY CHANGES cannot resolve a
-        # nested/dotted sequence_by path \u2014 see CURSOR_FIELD note below).
+        # nested/dotted sequence_by path — see CURSOR_FIELD note below).
         StructField("last_modified_at", StringType(), True),
         StructField("purview_tenant_id", StringType(), False),
     ]
@@ -210,7 +210,7 @@ TERMS_SCHEMA = StructType(
 
 
 # =============================================================================
-# Table schemas \u2014 Data Map (Atlas) + Scanning: classifications, tags, rules
+# Table schemas — Data Map (Atlas) + Scanning: classifications, tags, rules
 # =============================================================================
 
 # AtlasAttributeDef (subset) on a classification type definition.
@@ -227,7 +227,7 @@ CLASSIFICATION_ATTRIBUTE_DEF_STRUCT = StructType(
     ]
 )
 
-# AtlasClassificationDef \u2014 GET /datamap/api/atlas/v2/types/typedefs?type=classification
+# AtlasClassificationDef — GET /datamap/api/atlas/v2/types/typedefs?type=classification
 CLASSIFICATIONS_SCHEMA = StructType(
     [
         StructField("guid", StringType(), False),
@@ -261,7 +261,7 @@ RULE_PATTERN_STRUCT = StructType(
     ]
 )
 
-# ClassificationRule (System | Custom) \u2014 GET /scan/classificationrules.
+# ClassificationRule (System | Custom) — GET /scan/classificationrules.
 # ``properties`` is flattened to top-level columns.
 CLASSIFICATION_RULES_SCHEMA = StructType(
     [
@@ -345,7 +345,7 @@ TABLE_SCHEMAS: dict[str, StructType] = {
 CURSOR_FIELD = "last_modified_at"
 
 TABLE_METADATA: dict[str, dict] = {
-    # Governance domains are a low-volume taxonomy that changes infrequently \u2014
+    # Governance domains are a low-volume taxonomy that changes infrequently —
     # snapshotted in full each run (mirrors Collibra's ``domains``).
     "business_domains": {
         "primary_keys": ["id"],
@@ -362,7 +362,7 @@ TABLE_METADATA: dict[str, dict] = {
         "ingestion_type": "cdc",
     },
     # Data Map / Scanning tables: low-volume definitions or assignment sets
-    # with no reliable server-side change feed \u2014 full snapshot each run.
+    # with no reliable server-side change feed — full snapshot each run.
     "classifications": {
         "primary_keys": ["guid"],
         "ingestion_type": "snapshot",

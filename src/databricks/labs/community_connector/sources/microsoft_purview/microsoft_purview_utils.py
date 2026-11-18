@@ -158,7 +158,7 @@ def skip_top_paginate(
     """Yield records from a ``skip`` / ``top`` paginated Unified Catalog endpoint.
 
     Live behaviour (verified against a Purview tenant): ``dataProducts`` and
-    ``terms`` return ``{value, count}`` and **no** ``nextLink`` \u2014 the caller
+    ``terms`` return ``{value, count}`` and **no** ``nextLink`` — the caller
     pages by advancing ``skip``. ``params`` must already carry ``top``.
 
     * ``skip`` advances by the number of records actually returned (not by
